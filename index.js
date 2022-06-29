@@ -1,16 +1,13 @@
-var util = require('util');
 var MongoClient = require('mongodb').MongoClient;
-var Server = require('mongodb').Server;
 var Base = require('db-migrate-base');
 var Promise = require('bluebird');
 var log;
-var type;
 
 var MongodbDriver = Base.extend({
 
-  init: function(connection, internals, mongoString) {
+  init: function(client, internals, mongoString) {
     this._super(internals);
-    this.connection = connection;
+    this.client = client;
     this.connectionString = mongoString;
   },
 
@@ -75,7 +72,7 @@ var MongodbDriver = Base.extend({
     return Promise.resolve().nodeify(callback);
   },
 
-  createDatabase: function(dbName, options, callback) {
+  createDatabase: function(_, options, callback) {
     //Don't care at all, MongoDB auto creates databases
     if(typeof(options) === 'function')
       callback = options;
@@ -290,7 +287,8 @@ var MongodbDriver = Base.extend({
       };
 
       // Get a connection to mongo
-      this.connection.connect(this.connectionString, function(err, db) {
+      this.client.connect(function(err, connection) {
+        var db = connection.db()
 
         if(err) {
           prCB(err);
@@ -299,12 +297,17 @@ var MongodbDriver = Base.extend({
         // Callback function to return mongo records
         var callbackFunction = function(err, data) {
 
+          // we always try to create the `migrations` collection \
+          // mongodb@^4 throws an exception when the collection already exists \
+          // we have decided to eat up the error to mimic previous behaviour
+          if (err && err.codeName === "NamespaceExists") prCB(null, data)
+
           if(err) {
             prCB(err);
           }
 
           prCB(null, data);
-          db.close();
+          connection.close();
         };
 
         // Depending on the command, we need to use different mongo methods
@@ -329,14 +332,14 @@ var MongodbDriver = Base.extend({
             break;
           case 'insert':
             // options is the records to insert in this case
-            if(util.isArray(options))
+            if(Array.isArray(options))
               db.collection(collection).insertMany(options, {}, callbackFunction);
             else
               db.collection(collection).insertOne(options, {}, callbackFunction);
             break;
           case 'remove':
             // options is the records to insert in this case
-            if(util.isArray(options))
+            if(Array.isArray(options))
               db.collection(collection).deleteMany(options, callbackFunction);
             else
               db.collection(collection).deleteOne(options, callbackFunction);
@@ -384,7 +387,7 @@ var MongodbDriver = Base.extend({
    */
   _all: function() {
     var args = this._makeParamArgs(arguments);
-    return this.connection.query.apply(this.connection, args);
+    return this.client.query.apply(this.client, args);
   },
 
   /**
@@ -502,12 +505,12 @@ exports.connect = function(config, intern, callback) {
     port = config.port;
   }
 
-  config.host = util.isArray(config.hosts) ? config.hosts : config.host;
+  config.host = Array.isArray(config.hosts) ? config.hosts : config.host;
 
   if(config.host === undefined) {
 
     host = 'localhost' + ':' + port;
-  } else if(util.isArray(config.host) ) {
+  } else if(Array.isArray(config.host) ) {
 
     var length = config.host.length;
     host = '';
@@ -551,6 +554,6 @@ exports.connect = function(config, intern, callback) {
   }
 
 
-  db = config.db || new MongoClient(new Server(host, port));
+  db = config.db || new MongoClient(mongoString, { useNewUrlParser: true, useUnifiedTopology: true });
   callback(null, new MongodbDriver(db, intern, mongoString));
 };
