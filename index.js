@@ -300,7 +300,6 @@ var MongodbDriver = Base.extend({
           // we always try to create the `migrations` collection \
           // mongodb@^4 throws an exception when the collection already exists \
           // we have decided to eat up the error to mimic previous behaviour
-          console.log(err)
           if (err && err.codeName === "NamespaceExists") prCB(null, data)
 
           if(err) {
